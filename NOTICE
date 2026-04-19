@@ -1,0 +1,36 @@
+pdsprj-mcp
+Copyright (c) 2026 Daniel Spiridonov
+
+This project is licensed under the MIT License (see LICENSE).
+
+------------------------------------------------------------------------
+
+This project is an independent, third-party interoperability tool. It
+is not affiliated with, endorsed by, sponsored by, or otherwise
+connected to Labcenter Electronics Ltd.
+
+"Proteus", "Proteus Design Suite", "ISIS", and "ARES" are trademarks
+or registered trademarks of Labcenter Electronics Ltd. All other
+trademarks are the property of their respective owners. References to
+these names in source code, documentation, and file format identifiers
+are made solely for the purpose of describing interoperability with
+files produced by the corresponding software.
+
+The understanding of the .pdsprj / ROOT.DSN / ROOT.CDB file formats
+implemented in this project was obtained exclusively through analysis
+of output files produced by legitimately licensed installations of
+Proteus Design Suite, for the sole purpose of achieving
+interoperability between independently created software. No Labcenter
+Electronics source code, binary, library, header, asset, or
+documentation was decompiled, disassembled, copied, or redistributed
+in the creation of this project.
+
+This project does not include, bundle, or redistribute any software,
+libraries, binaries, fonts, icons, component libraries, footprints,
+or other assets owned by Labcenter Electronics Ltd. Users of this
+project must obtain and license Proteus Design Suite independently
+from Labcenter Electronics Ltd. if they wish to open, edit, or
+simulate the .pdsprj files produced or consumed by this project.
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+Use at your own risk. See LICENSE for full terms.
