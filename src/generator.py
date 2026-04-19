@@ -57,9 +57,18 @@ class WireSpec(BaseModel):
     vertices: list[tuple[int, int]] = Field(min_length=2, max_length=64)
 
 
+class TerminalSpec(BaseModel):
+    """VCC/GND терминал для питания и земли на схеме."""
+
+    kind: str = Field(description="$TERPOWER (VCC) или $TERGROUND (GND)")
+    x: int
+    y: int
+
+
 class SchematicSpec(BaseModel):
-    components: list[ComponentSpec]
+    components: list[ComponentSpec] = Field(default_factory=list)
     wires: list[WireSpec] = Field(default_factory=list)
+    terminals: list[TerminalSpec] = Field(default_factory=list)
 
 
 def generate_pdsprj(
@@ -105,7 +114,8 @@ def _rebuild_dsn(dsn: bytes, spec: SchematicSpec) -> bytes:
 
     comp_bytes = b"".join(_materialize_component(c) for c in spec.components)
     wire_bytes = b"".join(_materialize_wire(w) for w in spec.wires)
-    inserted = comp_bytes + wire_bytes
+    term_bytes = b"".join(_materialize_terminal(t) for t in spec.terminals)
+    inserted = comp_bytes + term_bytes + wire_bytes
     n = len(inserted)
     if n == 0:
         return dsn
@@ -189,6 +199,47 @@ def _materialize_wire(spec: WireSpec) -> bytes:
     for x, y in spec.vertices:
         buf += struct.pack("<ii", x, y)
     return bytes(buf)
+
+
+def _materialize_terminal(spec: TerminalSpec) -> bytes:
+    tpl = component_lib.load(spec.kind)
+    return component_lib.instantiate_terminal(tpl, spec.x, spec.y)
+
+
+def pin_position(
+    component: ComponentSpec, pin_name: str
+) -> tuple[int, int]:
+    """
+    Абсолютные координаты пина компонента. Требует чтобы у device
+    в библиотеке был прописан `pin_offsets[pin_name]`.
+    """
+    tpl = component_lib.load(component.device)
+    if pin_name not in tpl.pin_offsets:
+        raise KeyError(
+            f"{component.device}: pin '{pin_name}' не известен. "
+            f"Доступны: {sorted(tpl.pin_offsets)}"
+        )
+    dx, dy = tpl.pin_offsets[pin_name]
+    return component.x + dx, component.y + dy
+
+
+def connect_pin(
+    a: ComponentSpec, pin_a: str, b: ComponentSpec, pin_b: str
+) -> WireSpec:
+    """
+    Генерит L-образный провод между двумя пинами. Сначала горизонталь,
+    потом вертикаль.
+    """
+    pa = pin_position(a, pin_a)
+    pb = pin_position(b, pin_b)
+    if pa[1] == pb[1]:
+        vertices = [pa, pb]
+    elif pa[0] == pb[0]:
+        vertices = [pa, pb]
+    else:
+        # L-route: через (pb.x, pa.y)
+        vertices = [pa, (pb[0], pa[1]), pb]
+    return WireSpec(vertices=vertices)
 
 
 def _patch_firmware(

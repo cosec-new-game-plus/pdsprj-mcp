@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import struct
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +49,10 @@ class ComponentTemplate(BaseModel):
     template_hex: str = Field(description="байты компонента с занулёнными refdes/x/y")
     refdes_len: int = Field(description="длина refdes в sample-файле (для reshape)")
     xy_offset: int = Field(description="позиция i32,i32 x,y внутри template")
+    xy_pairs: list[tuple[int, int, int]] = Field(
+        default_factory=list,
+        description="(byte_offset, dx, dy) — позиции label (x,y) пар в template, относительные к orig_xy",
+    )
     pin_offsets: dict[str, tuple[int, int]] = Field(default_factory=dict)
     properties: dict[str, str] = Field(default_factory=dict)
     source_file: str | None = None
@@ -86,8 +92,6 @@ def extract_template(
     if not comp.device:
         raise ValueError(f"{refdes}: не определён device type")
 
-    import zipfile
-
     with zipfile.ZipFile(pdsprj_path) as zf:
         dsn = zf.read("ROOT.DSN")
 
@@ -101,7 +105,16 @@ def extract_template(
     raw = bytearray(dsn[comp.dsn_offset : end])
     rlen = len(comp.refdes)
     xy_off = 2 + rlen
-    struct.pack_into("<ii", raw, xy_off, 0, 0)
+
+    # Найти все (x:i32, y:i32) пары в template, близкие к orig_xy —
+    # это label-позиции, pin-позиции и прочие embedded координаты.
+    # При перемещении компонента их все надо обновить, иначе элементы
+    # разбегаются и Proteus не рендерит компонент.
+    xy_pairs = _find_xy_pairs_near(raw, comp.x, comp.y, bbox=2_500_000)
+    # Занулить в template: чтобы template_hex содержал относительные
+    # (dx, dy) offsets напрямую, instantiate просто добавит new_xy.
+    for off, dx, dy in xy_pairs:
+        struct.pack_into("<ii", raw, off, dx, dy)
 
     return ComponentTemplate(
         device=comp.device,
@@ -110,11 +123,35 @@ def extract_template(
         template_hex=raw.hex(),
         refdes_len=rlen,
         xy_offset=xy_off,
+        xy_pairs=xy_pairs,
         pin_offsets=pin_offsets or {},
         properties=dict(comp.properties),
         source_file=pdsprj_path.name,
         source_refdes=refdes,
     )
+
+
+def _find_xy_pairs_near(
+    data: bytes, orig_x: int, orig_y: int, bbox: int
+) -> list[tuple[int, int, int]]:
+    """
+    Находит все оффсеты, где лежит (x:i32, y:i32) пара с |x-orig_x|<bbox
+    и |y-orig_y|<bbox. Возвращает `[(offset, dx, dy), ...]`.
+
+    Offsets не пересекающиеся — если пара найдена на off, следующий
+    поиск идёт с off+8.
+    """
+    pairs: list[tuple[int, int, int]] = []
+    i = 0
+    while i + 8 <= len(data):
+        x = struct.unpack_from("<i", data, i)[0]
+        y = struct.unpack_from("<i", data, i + 4)[0]
+        if abs(x - orig_x) < bbox and abs(y - orig_y) < bbox:
+            pairs.append((i, x - orig_x, y - orig_y))
+            i += 8
+        else:
+            i += 1
+    return pairs
 
 
 def instantiate(
@@ -124,8 +161,9 @@ def instantiate(
     Материализует template → готовый бинарный блок компонента с заданными
     refdes и координатами.
 
-    Переписывает `[ff len refdes]` и `[x:i32 y:i32]`. Остальные байты
-    (24B header flags, labels, свойства, pin block) остаются как есть.
+    Переписывает `[ff len refdes]`, xy компонента, И все embedded
+    x/y-позиции labels (x_offsets/y_offsets) — иначе labels остаются на
+    старых абсолютных координатах и Proteus не рендерит компонент.
     """
     if len(refdes) > 255:
         raise ValueError("refdes слишком длинный (max 255)")
@@ -136,15 +174,17 @@ def instantiate(
     new_refdes = refdes.encode("ascii")
     new_rlen = len(new_refdes)
 
-    # [ff][len][refdes_bytes×rlen][body...]
     head = bytes([0xFF, new_rlen]) + new_refdes
-    # body в оригинальном template начинается на offset 2+original_rlen
     body = template_bytes[2 + original_rlen :]
     result = bytearray(head + body)
 
-    # xy_offset в новом буфере сдвинут если refdes изменил длину
-    new_xy_off = 2 + new_rlen
-    struct.pack_into("<ii", result, new_xy_off, x, y)
+    # Для каждого (offset, dx, dy) из xy_pairs: пишем (x+dx, y+dy).
+    # Offsets сдвигаются если refdes изменил размер.
+    delta = new_rlen - original_rlen
+    for off, dx, dy in template.xy_pairs:
+        new_off = off + delta if off >= 2 + original_rlen else off
+        if 0 <= new_off <= len(result) - 8:
+            struct.pack_into("<ii", result, new_off, x + dx, y + dy)
 
     return bytes(result)
 
@@ -208,6 +248,63 @@ def _find_next_object_boundary(data: bytes, start: int, limit: int) -> int | Non
 # ---------- Seeding ----------
 
 
+def extract_terminal_template(
+    pdsprj_path: Path, kind: str
+) -> ComponentTemplate:
+    """
+    Извлекает binary template терминала (`$TERPOWER`, `$TERGROUND` и т.п.)
+    из sample-файла. Терминал хранится в DSN как объект вида:
+
+        [0x10][x:i32][y:i32][4B flags][len:u8][kind:ascii][метки + ~100B]
+
+    Мы ищем первое вхождение `kind` в CIRCUIT секции, берём 13 байт
+    заголовка назад, и до начала следующего объекта.
+    """
+    pdsprj_path = Path(pdsprj_path)
+    with zipfile.ZipFile(pdsprj_path) as zf:
+        dsn = zf.read("ROOT.DSN")
+    cs = dsn.find(b"ISIS CIRCUIT FILE")
+    ce = dsn.find(b"ISIS CIRCUIT FILE", cs + 1)
+    ce = ce if ce != -1 else len(dsn)
+
+    pattern = (
+        b"\x10" + b".{12}" + bytes([len(kind)]) + re.escape(kind.encode("ascii"))
+    )
+    m = re.search(pattern, dsn[cs:ce], flags=re.DOTALL)
+    if m is None:
+        raise ValueError(f"{kind} не найден в CIRCUIT секции {pdsprj_path.name}")
+    start = cs + m.start()
+    # Ищем следующий объект после начала ТЕКУЩЕГО терминала + его header'а
+    # (14 байт заголовка + len name + ~40 байт label'а внутри). Пропускаем
+    # минимум 60 байт чтобы не зацепить внутренние $TER* строки (например
+    # "TERMINAL LABEL" внутри терминала).
+    search_from = start + 60
+    boundary = _find_next_object_boundary(dsn, search_from, ce)
+    end = boundary if boundary is not None else ce
+
+    raw = bytearray(dsn[start:end])
+    struct.pack_into("<ii", raw, 1, 0, 0)  # занулить xy
+
+    return ComponentTemplate(
+        device=kind,
+        device_tag=None,
+        template_hex=raw.hex(),
+        refdes_len=0,
+        xy_offset=1,
+        source_file=pdsprj_path.name,
+        source_refdes=kind,
+    )
+
+
+def instantiate_terminal(
+    template: ComponentTemplate, x: int, y: int
+) -> bytes:
+    """Материализует terminal template с заданными координатами."""
+    raw = bytearray(template.template_bytes)
+    struct.pack_into("<ii", raw, template.xy_offset, x, y)
+    return bytes(raw)
+
+
 @dataclass
 class SeedPlan:
     pdsprj: Path
@@ -220,7 +317,7 @@ def seed_from_dataset(
 ) -> list[str]:
     """
     Проходит по всем `.pdsprj` в `dataset`, извлекает по одному шаблону
-    для каждого уникального device type.
+    для каждого уникального device type + набор известных терминалов.
     """
     seen: set[str] = set()
     saved: list[str] = []
@@ -237,4 +334,18 @@ def seed_from_dataset(
             save(tpl, components_dir)
             seen.add(c.device)
             saved.append(c.device)
+
+    # Терминалы: отдельно, т.к. они не компоненты
+    for kind in ["$TERPOWER", "$TERGROUND"]:
+        if kind in seen:
+            continue
+        for pdsprj in sorted(dataset.rglob("*.pdsprj")):
+            try:
+                tpl = extract_terminal_template(pdsprj, kind)
+                save(tpl, components_dir)
+                seen.add(kind)
+                saved.append(kind)
+                break
+            except ValueError:
+                continue
     return saved
