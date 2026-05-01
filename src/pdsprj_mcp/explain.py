@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 
-from src.parser import Component, Schematic, Wire, parse_schematic
+from pdsprj_mcp.parser import Component, Schematic, Wire, parse_schematic
 
 
 def explain(pdsprj_path: Path) -> str:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.parser import Schematic, parse_schematic
+from pdsprj_mcp.parser import Schematic, parse_schematic
 
 DATASET = Path(__file__).parent.parent / "samples" / "hse-microcontrollers" / "Labs"
 

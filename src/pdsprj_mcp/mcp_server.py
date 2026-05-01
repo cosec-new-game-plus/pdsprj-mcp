@@ -21,8 +21,8 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
-from src import asm_tools, explain
-from src.parser import parse_schematic as _parse_schematic
+from pdsprj_mcp import asm_tools, explain
+from pdsprj_mcp.parser import parse_schematic as _parse_schematic
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -86,5 +86,10 @@ def set_firmware(
     return str(out)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console entry-point: launches the MCP server on stdio."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()
