@@ -1,42 +1,37 @@
 # pdsprj-mcp
 
-An MCP (Model Context Protocol) server that lets Claude read and modify
-Proteus 8 schematic projects (`.pdsprj` files). Designed for the
-microcontroller-assignments workflow: you draw the schematic in Proteus,
-hand the file to Claude, and Claude explains the circuit, writes the
-8051 / AT89C51 assembly code, and writes the firmware back into the
-project archive — all without leaving the conversation.
+MCP-сервер (Model Context Protocol), позволяющий Claude читать и
+изменять проекты Proteus 8 (`.pdsprj`). Рассчитан на типичный
+сценарий микроконтроллерных лабораторных: вы рисуете схему в Proteus,
+отдаёте файл Claude'у, а тот объясняет схему, пишет ассемблер для
+8051 / AT89C51 и кладёт прошивку обратно в архив — не выходя из
+переписки.
 
-> **Not a schematic generator.** Proteus's binary format is closed and
-> components contain absolute pointers into the library section that
-> can't be safely synthesised from outside the IDE. This tool inspects
-> and modifies user-drawn schematics; it doesn't create new ones.
+> **Не аффилирован с Labcenter Electronics Ltd.** «Proteus» — их
+> торговая марка. Подробнее в [`NOTICE`](NOTICE).
 
-> **Not affiliated with Labcenter Electronics Ltd.** "Proteus" is their
-> trademark. See [`NOTICE`](NOTICE) for full disclaimer.
+## Что умеет
 
-## What it does
+Сервер предоставляет пять MCP-инструментов:
 
-The server exposes five MCP tools:
-
-| Tool | Purpose |
+| Инструмент | Назначение |
 |---|---|
-| `parse_schematic(path)` | Structured JSON of components, pins, wires, properties |
-| `explain_schematic(path)` | Markdown summary, grouped by device type |
-| `get_asm(path)` | Read `FIRMWARE/<MCU>/main.asm` |
-| `get_hex(path)` | Read `Debug.HEX` (Intel HEX) |
-| `set_firmware(path, asm_code, output_path?, hex_code?)` | Write new ASM / HEX into the archive |
+| `parse_schematic(path)` | JSON: компоненты, пины, провода, свойства |
+| `explain_schematic(path)` | Markdown-сводка, сгруппирована по device-type |
+| `get_asm(path)` | Прочитать `FIRMWARE/<MCU>/main.asm` |
+| `get_hex(path)` | Прочитать `Debug.HEX` (Intel HEX) |
+| `set_firmware(path, asm_code, output_path?, hex_code?)` | Записать новый ASM (и опц. HEX) в архив |
 
-Other files in the `.pdsprj` ZIP are passed through unchanged.
+Остальные файлы внутри ZIP `.pdsprj` проходят без изменений.
 
-## Requirements
+## Требования
 
 - Python ≥ 3.12
-- [`uv`](https://docs.astral.sh/uv/) (recommended) or `pip`
-- A licensed copy of Proteus Design Suite (to draw schematics and
-  verify outputs). The server itself never invokes Proteus.
+- [`uv`](https://docs.astral.sh/uv/) (рекомендуется) или `pip`
+- Лицензионный Proteus Design Suite — для рисования схем и проверки
+  результатов. Сам сервер Proteus не запускает.
 
-## Install
+## Установка
 
 ```bash
 git clone https://github.com/danspiridonov/pdsprj-mcp.git
@@ -44,115 +39,117 @@ cd pdsprj-mcp
 uv sync
 ```
 
-This creates a virtual env in `.venv/` and installs the `pdsprj-mcp`
-console script.
+`uv sync` создаст виртуальное окружение в `.venv/` и установит
+консольную команду `pdsprj-mcp`.
 
-Smoke-test:
+Smoke-тест:
 
 ```bash
-uv run pytest              # parser tests
-uv run pdsprj-mcp          # launches MCP server on stdio (Ctrl-C to stop)
+uv run pytest              # тесты парсера
+uv run pdsprj-mcp          # запустит MCP-сервер на stdio (Ctrl-C для выхода)
 ```
 
-## Connect to a Claude client
+## Подключение к Claude
 
-The server speaks MCP over stdio. Point your Claude client at the
-`pdsprj-mcp` script inside the project's virtualenv.
+Сервер общается по MCP через stdio. Укажите клиенту путь к
+`pdsprj-mcp` внутри `.venv/` проекта.
 
 ### Claude Desktop
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`
-(macOS) or the equivalent on your platform:
+Отредактируйте `~/Library/Application Support/Claude/claude_desktop_config.json`
+(macOS) или соответствующий файл в вашей ОС:
 
 ```json
 {
   "mcpServers": {
     "pdsprj": {
-      "command": "/absolute/path/to/pdsprj-mcp/.venv/bin/pdsprj-mcp"
+      "command": "/абсолютный/путь/к/pdsprj-mcp/.venv/bin/pdsprj-mcp"
     }
   }
 }
 ```
 
-Restart Claude Desktop. The five tools listed above appear under the
-`pdsprj` server.
+Перезапустите Claude Desktop. Пять инструментов появятся под
+сервером `pdsprj`.
 
 ### Claude Code
 
 ```bash
-claude mcp add pdsprj /absolute/path/to/pdsprj-mcp/.venv/bin/pdsprj-mcp
+claude mcp add pdsprj /абсолютный/путь/к/pdsprj-mcp/.venv/bin/pdsprj-mcp
 ```
 
-### Any other MCP client
+### Любой другой MCP-клиент
 
-Run the binary; it speaks MCP on stdin/stdout:
+Запустите бинарник — он говорит по MCP в stdin/stdout:
 
 ```bash
-/absolute/path/to/pdsprj-mcp/.venv/bin/pdsprj-mcp
+/абсолютный/путь/к/pdsprj-mcp/.venv/bin/pdsprj-mcp
 ```
 
-## Typical workflow
+## Типовой workflow
 
-1. **You** open Proteus, place an AT89C51 plus whatever passive
-   components and peripherals the assignment requires, wire each MCU
-   pin to its destination, and save as `lab.pdsprj`.
-2. **You** ask Claude something like:
-   > "Here's `~/work/lab.pdsprj`. The task is to light an LED on P1.0
-   > whenever the button on P3.2 is pressed. Explain what's wired up
-   > and write the ASM."
-3. **Claude** calls `explain_schematic` to ground the discussion in
-   the actual pins you wired, calls `get_asm` to see any boilerplate
-   already in the project, writes the program, and calls
-   `set_firmware` to drop it into the archive.
-4. **You** open the result in Proteus, hit *Build → Compile* (or load
-   the HEX directly), and run the simulation.
+1. **Вы** открываете Proteus, ставите AT89C51 + нужные периферийные
+   компоненты (кнопки, светодиоды, резисторы, индикаторы), разводите
+   провода от пинов MCU и сохраняете как `lab.pdsprj`.
+2. **Вы** пишете Claude'у:
+   > «Вот `~/work/lab.pdsprj`. Задание: зажигать LED на P1.0 пока
+   > нажата кнопка на P3.2. Объясни что подключено и напиши ASM».
+3. **Claude** вызывает `explain_schematic` чтобы привязать ответ к
+   реально разведённым пинам, читает существующий шаблон через
+   `get_asm`, пишет программу, кладёт её в архив через `set_firmware`.
+4. **Вы** открываете результат в Proteus, делаете *Build → Compile*
+   (или подгружаете HEX напрямую) и запускаете симуляцию.
 
-## What's inside a `.pdsprj`
+## Что внутри `.pdsprj`
 
-A `.pdsprj` is a ZIP containing:
+`.pdsprj` — это ZIP-архив:
 
 ```
-ROOT.DSN          binary schematic (proprietary, partially reversed)
-ROOT.CDB          netlist + pin name/number map (proprietary)
-PROJECT.XML       project metadata
+ROOT.DSN          бинарная схема (закрытый формат, частично разобран)
+ROOT.CDB          netlist + маппинг pin name/number (закрытый формат)
+PROJECT.XML       метаданные проекта
 FIRMWARE/<MCU>/
-  main.asm        plain text — what set_firmware writes
-  Debug.HEX       Intel HEX — what set_firmware writes
+  main.asm        обычный текст — то, что пишет set_firmware
+  Debug.HEX       Intel HEX — то, что пишет set_firmware
 ```
 
-The server reads `ROOT.DSN` + `ROOT.CDB` for component/wire info and
-edits `FIRMWARE/...` in place. It never rewrites `ROOT.DSN`.
+Сервер читает `ROOT.DSN` + `ROOT.CDB` для информации о компонентах
+и проводах, и редактирует `FIRMWARE/...` на месте. `ROOT.DSN` он не
+переписывает.
 
-## Project layout
+## Структура проекта
 
 ```
 src/pdsprj_mcp/
-  parser.py       — DSN binary parser (Pydantic models)
-  explain.py      — Markdown summarizer
-  asm_tools.py    — ASM/HEX read/write inside the ZIP
-  mcp_server.py   — FastMCP wrapper + console entry-point
+  parser.py       — парсер бинарного DSN (Pydantic-модели)
+  explain.py      — markdown-сводка схемы
+  asm_tools.py    — чтение/запись ASM/HEX внутри ZIP
+  mcp_server.py   — FastMCP-обёртка + console entry-point
 tests/
-  test_parser.py  — exercises the parser on a private dataset
+  test_parser.py  — тесты парсера на приватном датасете
+docs/
+  format.md       — справка по формату .pdsprj
+  limitations.md  — границы применимости и нерешённые места
 ```
 
-## Documentation
+## Документация
 
-- [`docs/format.md`](docs/format.md) — `.pdsprj` binary format reference (what
-  the parser reads from `ROOT.DSN` and `ROOT.CDB`).
-- [`docs/limitations.md`](docs/limitations.md) — why the server doesn't
-  generate schematics, and what would be needed to change that.
+- [`docs/format.md`](docs/format.md) — справка по бинарному формату
+  `.pdsprj` (что парсер читает из `ROOT.DSN` и `ROOT.CDB`).
+- [`docs/limitations.md`](docs/limitations.md) — границы применимости
+  и почему сервер не генерирует схемы с нуля.
 
-## Development
+## Разработка
 
 ```bash
-uv sync                  # install runtime + dev deps
-uv run pytest            # run tests
-uv run pdsprj-mcp        # launch the server (Ctrl-C to stop)
+uv sync                  # установить runtime + dev зависимости
+uv run pytest            # тесты
+uv run pdsprj-mcp        # запустить сервер (Ctrl-C для выхода)
 ```
 
-The parser tests need a dataset that isn't shipped with the repo (it's
-student coursework). They are skipped if `samples/` is empty.
+Тесты парсера требуют датасет, которого нет в репозитории
+(студенческие работы). Если `samples/` пуст — тесты пропускаются.
 
-## License
+## Лицензия
 
-MIT — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+MIT — см. [`LICENSE`](LICENSE) и [`NOTICE`](NOTICE).
