@@ -135,6 +135,13 @@ tests/
   test_parser.py  — exercises the parser on a private dataset
 ```
 
+## Documentation
+
+- [`docs/format.md`](docs/format.md) — `.pdsprj` binary format reference (what
+  the parser reads from `ROOT.DSN` and `ROOT.CDB`).
+- [`docs/limitations.md`](docs/limitations.md) — why the server doesn't
+  generate schematics, and what would be needed to change that.
+
 ## Development
 
 ```bash
