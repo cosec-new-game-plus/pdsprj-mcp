@@ -25,7 +25,13 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from src import component_lib
-from src.parser import _find_circuit, _parse_components, _parse_wires
+from src.cdb_writer import (
+    CDBComponentEntry,
+    build_per_component_block,
+    find_per_component_block,
+    replace_per_component_block,
+)
+from src.parser import _find_circuit, _parse_components, _parse_wires, parse_schematic
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +94,11 @@ def generate_pdsprj(
     dsn = members["ROOT.DSN"]
     new_dsn = _rebuild_dsn(dsn, spec)
     members["ROOT.DSN"] = new_dsn
+
+    if "ROOT.CDB" in members and spec.components:
+        members["ROOT.CDB"] = _rebuild_cdb(
+            members["ROOT.CDB"], dsn, spec
+        )
 
     if asm_code is not None or hex_code is not None:
         _patch_firmware(members, asm_code, hex_code)
@@ -204,6 +215,71 @@ def _materialize_wire(spec: WireSpec) -> bytes:
 def _materialize_terminal(spec: TerminalSpec) -> bytes:
     tpl = component_lib.load(spec.kind)
     return component_lib.instantiate_terminal(tpl, spec.x, spec.y)
+
+
+def _rebuild_cdb(cdb: bytes, chassis_dsn: bytes, spec: SchematicSpec) -> bytes:
+    """
+    Перестраивает per-component блок CDB с добавлением spec.components.
+
+    Существующие entries chassis'а (MCU U1, осциллограф $IOSCILLOSCOPE и пр.)
+    читаются из chassis CDB, новые компоненты добавляются в конец с
+    инкрементальными id.
+    """
+    # Парсим существующие entries из chassis CDB
+    existing = _parse_existing_cdb_entries(cdb)
+    next_id = max((e.id for e in existing), default=1) + 1
+
+    # Добавляем наши компоненты
+    for c in spec.components:
+        try:
+            tpl = component_lib.load(c.device)
+            pins = list(tpl.pin_offsets.keys())
+        except FileNotFoundError:
+            pins = []
+        existing.append(CDBComponentEntry(id=next_id, refdes=c.refdes, pins=pins))
+        next_id += 1
+
+    return replace_per_component_block(cdb, existing)
+
+
+def _parse_existing_cdb_entries(cdb: bytes) -> list[CDBComponentEntry]:
+    """Парсит существующие per-component entries из chassis CDB."""
+    start, end = find_per_component_block(cdb)
+    block = cdb[start:end]
+    entries: list[CDBComponentEntry] = []
+    off = 0
+    while off + 24 < len(block):  # минимум header + refdes_len + pin_count
+        # Проверка на FFFFFFFF separator — сигнал конца entries
+        if block[off : off + 4] == b"\xff\xff\xff\xff":
+            # После ffffffff идёт TAIL, не парсим дальше
+            break
+        # Header 16B
+        id_, const2, zero, id_rep = struct.unpack_from("<IIII", block, off)
+        if const2 != 2 or zero != 0 or id_ != id_rep:
+            break  # не похоже на entry
+        off += 16
+        rlen = block[off]
+        off += 1
+        refdes = block[off : off + rlen].decode("ascii") if rlen else ""
+        off += rlen
+        pin_count = struct.unpack_from("<I", block, off)[0]
+        off += 4
+        pins: list[str] = []
+        for _ in range(pin_count):
+            plen = block[off]
+            off += 1
+            pins.append(block[off : off + plen].decode("ascii"))
+            off += plen + 1  # name + trailing 00
+        # Trailer 8B
+        off += 8
+        # Separator 4B (zeros between entries)
+        if off + 4 <= len(block) and block[off : off + 4] in (
+            b"\x00\x00\x00\x00",
+            b"\xff\xff\xff\xff",
+        ):
+            off += 4
+        entries.append(CDBComponentEntry(id=id_, refdes=refdes, pins=pins))
+    return entries
 
 
 def pin_position(
