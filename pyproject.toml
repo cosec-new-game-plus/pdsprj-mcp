@@ -23,8 +23,8 @@ dependencies = [
 pdsprj-mcp = "pdsprj_mcp.mcp_server:main"
 
 [project.urls]
-Repository = "https://github.com/danspiridonov/pdsprj-mcp"
-Issues = "https://github.com/danspiridonov/pdsprj-mcp/issues"
+Repository = "https://github.com/cosec-new-game-plus/pdsprj-mcp"
+Issues = "https://github.com/cosec-new-game-plus/pdsprj-mcp/issues"
 
 [dependency-groups]
 dev = [

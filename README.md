@@ -33,58 +33,41 @@ MCP-сервер (Model Context Protocol), позволяющий Claude чит�
 
 ## Установка
 
-```bash
-git clone https://github.com/danspiridonov/pdsprj-mcp.git
-cd pdsprj-mcp
-uv sync
-```
-
-`uv sync` создаст виртуальное окружение в `.venv/` и установит
-консольную команду `pdsprj-mcp`.
-
-Smoke-тест:
+Инструкция рассчитана на [Claude Code](https://docs.claude.com/en/docs/claude-code)
+(CLI). Ничего клонировать не нужно — `uv` поставит пакет прямо из
+GitHub в изолированное окружение и положит команду `pdsprj-mcp` в
+`PATH`:
 
 ```bash
-uv run pytest              # тесты парсера
-uv run pdsprj-mcp          # запустит MCP-сервер на stdio (Ctrl-C для выхода)
+uv tool install git+https://github.com/cosec-new-game-plus/pdsprj-mcp.git
 ```
 
-## Подключение к Claude
-
-Сервер общается по MCP через stdio. Укажите клиенту путь к
-`pdsprj-mcp` внутри `.venv/` проекта.
-
-### Claude Desktop
-
-Отредактируйте `~/Library/Application Support/Claude/claude_desktop_config.json`
-(macOS) или соответствующий файл в вашей ОС:
-
-```json
-{
-  "mcpServers": {
-    "pdsprj": {
-      "command": "/абсолютный/путь/к/pdsprj-mcp/.venv/bin/pdsprj-mcp"
-    }
-  }
-}
-```
-
-Перезапустите Claude Desktop. Пять инструментов появятся под
-сервером `pdsprj`.
-
-### Claude Code
+Подключите сервер к Claude Code:
 
 ```bash
-claude mcp add pdsprj /абсолютный/путь/к/pdsprj-mcp/.venv/bin/pdsprj-mcp
+claude mcp add pdsprj pdsprj-mcp
+```
+
+Готово — внутри `claude` появятся пять инструментов под сервером
+`pdsprj`. Если CLI ругается, что не находит команду, подставьте
+полный путь от `which pdsprj-mcp`.
+
+Обновление до свежего `main` и удаление:
+
+```bash
+uv tool upgrade pdsprj-mcp
+uv tool uninstall pdsprj-mcp
+```
+
+### Разовый запуск без установки
+
+```bash
+uvx --from git+https://github.com/cosec-new-game-plus/pdsprj-mcp.git pdsprj-mcp
 ```
 
 ### Любой другой MCP-клиент
 
-Запустите бинарник — он говорит по MCP в stdin/stdout:
-
-```bash
-/абсолютный/путь/к/pdsprj-mcp/.venv/bin/pdsprj-mcp
-```
+Запустите `pdsprj-mcp` — он говорит по MCP в stdin/stdout.
 
 ## Типовой workflow
 
@@ -142,6 +125,8 @@ docs/
 ## Разработка
 
 ```bash
+git clone https://github.com/cosec-new-game-plus/pdsprj-mcp.git
+cd pdsprj-mcp
 uv sync                  # установить runtime + dev зависимости
 uv run pytest            # тесты
 uv run pdsprj-mcp        # запустить сервер (Ctrl-C для выхода)
